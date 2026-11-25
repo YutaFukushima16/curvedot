@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CurveDot ― 曲線・角度・円周の計測</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif; background: #f4f4f2; color: #222; }
+  header { padding: 10px 14px; background: #2b2b2b; color: #fff; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .sub { font-size: 12px; color: #bbb; }
+  .toolbar { padding: 8px 14px; background: #fff; border-bottom: 1px solid #ddd; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .toolbar .group { display: flex; gap: 4px; align-items: center; }
+  .toolbar .sep { width: 1px; height: 24px; background: #ddd; margin: 0 4px; }
+  button { font-size: 13px; padding: 6px 12px; border: 1px solid #bbb; background: #fff; border-radius: 6px; cursor: pointer; }
+  button:hover { background: #eef3ff; }
+  button.active { background: #2f5fd0; color: #fff; border-color: #2f5fd0; }
+  button.primary { background: #2f5fd0; color: #fff; border-color: #2f5fd0; }
+  input[type="number"] { width: 76px; font-size: 13px; padding: 5px 6px; border: 1px solid #bbb; border-radius: 6px; }
+  label { font-size: 13px; }
+  #status { padding: 6px 14px; font-size: 13px; background: #fffbe6; border-bottom: 1px solid #eee; min-height: 30px; }
+  #wrap { display: flex; align-items: stretch; }
+  #canvasBox { flex: 1; position: relative; background: #888; min-height: 70vh; overflow: hidden; }
+  canvas { display: block; cursor: crosshair; }
+  #side { width: 340px; background: #fff; border-left: 1px solid #ddd; padding: 10px 12px; overflow-y: auto; max-height: calc(100vh - 130px); }
+  #side h2 { font-size: 14px; margin: 6px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #f0f0f0; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .del { color: #c00; border: none; background: none; cursor: pointer; font-size: 12px; padding: 0 2px; }
+  .hint { font-size: 12px; color: #666; line-height: 1.7; }
+  .live { font-size: 13px; background: #eef3ff; border: 1px solid #c9d6f5; border-radius: 6px; padding: 6px 8px; margin-bottom: 8px; min-height: 32px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CurveDot</h1>
+  <span class="sub">実測図のカーブをなぞって、長さ（円周）・角度・円の大きさを測る</span>
+</header>
+
+<div class="toolbar">
+  <div class="group">
+    <button id="btnOpen">画像を開く</button>
+    <input type="file" id="fileInput" accept="image/*" style="display:none">
+  </div>
+  <div class="sep"></div>
+  <div class="group">
+    <button data-mode="scale">1. 縮尺</button>
+    <button data-mode="curve" class="active">2. 曲線</button>
+    <button data-mode="angle">3. 角度</button>
+    <button data-mode="circle">4. 円</button>
+    <button data-mode="pan">移動</button>
+  </div>
+  <div class="sep"></div>
+  <div class="group">
+    <button id="btnUndo">点を1つ戻す</button>
+    <button id="btnClear">作業中の点を消す</button>
+  </div>
+  <div class="sep"></div>
+  <div class="group">
+    <button id="btnFinish" class="primary">曲線を確定</button>
+    <button id="btnFinishClosed" class="primary">閉じて確定（円周）</button>
+  </div>
+</div>
+
+<div id="status">画像を開いてください。まず「縮尺」で図のスケールバー（例：10cm）を2点クリックし、実寸を入れると mm で測れます。</div>
+
+<div id="wrap">
+  <div id="canvasBox"><canvas id="cv"></canvas></div>
+  <div id="side">
+    <div class="live" id="live">作業中の計測はここに出ます。</div>
+    <h2>計測結果</h2>
+    <table>
+      <thead><tr><th>名前</th><th>結果</th><th></th></tr></thead>
+      <tbody id="resultBody"></tbody>
+    </table>
+    <p style="margin-top:10px;">
+      <button id="btnCsv">CSVで保存</button>
+      <button id="btnAllDel">結果を全部消す</button>
+    </p>
+    <h2>使い方</h2>
+    <p class="hint">
+      ・縮尺：スケールバーの両端をクリック → 実寸（mm）を入力。<br>
+      ・曲線：カーブに沿ってクリックで点を打つ → 「曲線を確定」。閉じた輪なら「閉じて確定」で周の長さ（円周）が出る。各点での接線の向きと、曲がり角度の合計も出る。<br>
+      ・角度：端→頂点→端の順に3点クリック。<br>
+      ・円：円周上の3点をクリック → 半径・直径・円周と、1点目から3点目までの弧の角度。<br>
+      ・拡大縮小：マウスホイール。移動：「移動」モードでドラッグ、またはスペースを押しながらドラッグ。<br>
+      ・縮尺を入れていない場合は px（ピクセル）で表示される。
+    </p>
+  </div>
+</div>
+
+<script>
+"use strict";
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const box = document.getElementById('canvasBox');
+const statusEl = document.getElementById('status');
+const liveEl = document.getElementById('live');
+const resultBody = document.getElementById('resultBody');
+
+let img = null;
+let view = { s: 1, ox: 0, oy: 0 };
+let pxPerMm = null;           // 校正後にセット
+let mode = 'curve';
+let work = [];                // 作業中の点（画像座標）
+let results = [];             // {kind, name, data..., geom}
+let counters = { curve: 0, angle: 0, circle: 0 };
+let spaceDown = false;
+let drag = null;
+
+function setStatus(t) { statusEl.textContent = t; }
+
+function resize() {
+  cv.width = box.clientWidth;
+  cv.height = box.clientHeight;
+  draw();
+}
+window.addEventListener('resize', resize);
+
+function toImg(x, y) { return { x: (x - view.ox) / view.s, y: (y - view.oy) / view.s }; }
+function toScr(p) { return { x: p.x * view.s + view.ox, y: p.y * view.s + view.oy }; }
+function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+function fmt(n, d) { return n.toFixed(d === undefined ? 1 : d); }
+function lenStr(px) {
+  if (pxPerMm) return fmt(px / pxPerMm) + ' mm';
+  return fmt(px, 0) + ' px（未校正）';
+}
+// 2ベクトルのなす角（度、0〜180）
+function angleDeg(a, b, c) { // bが頂点
+  const v1 = { x: a.x - b.x, y: a.y - b.y }, v2 = { x: c.x - b.x, y: c.y - b.y };
+  const d = (v1.x * v2.x + v1.y * v2.y) / (Math.hypot(v1.x, v1.y) * Math.hypot(v2.x, v2.y) || 1);
+  return Math.acos(Math.max(-1, Math.min(1, d))) * 180 / Math.PI;
+}
+// 方向の変化（-180〜180）
+function dirChange(p0, p1, p2) {
+  const a1 = Math.atan2(p1.y - p0.y, p1.x - p0.x);
+  const a2 = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+  let d = (a2 - a1) * 180 / Math.PI;
+  while (d > 180) d -= 360;
+  while (d < -180) d += 360;
+  return d;
+}
+// 3点を通る円
+function circleFrom3(p1, p2, p3) {
+  const d = 2 * (p1.x * (p2.y - p3.y) + p2.x * (p3.y - p1.y) + p3.x * (p1.y - p2.y));
+  if (Math.abs(d) < 1e-9) return null;
+  const ux = ((p1.x * p1.x + p1.y * p1.y) * (p2.y - p3.y) + (p2.x * p2.x + p2.y * p2.y) * (p3.y - p1.y) + (p3.x * p3.x + p3.y * p3.y) * (p1.y - p2.y)) / d;
+  const uy = ((p1.x * p1.x + p1.y * p1.y) * (p3.x - p2.x) + (p2.x * p2.x + p2.y * p2.y) * (p1.x - p3.x) + (p3.x * p3.x + p3.y * p3.y) * (p2.x - p1.x)) / d;
+  const c = { x: ux, y: uy };
+  return { c, r: dist(c, p1) };
+}
+
+function draw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  if (!img) return;
+  ctx.setTransform(view.s, 0, 0, view.s, view.ox, view.oy);
+  ctx.drawImage(img, 0, 0);
+  const lw = 1.6 / view.s, pr = 4 / view.s;
+  // 確定済み
+  for (const r of results) {
+    ctx.lineWidth = lw;
+    if (r.kind === 'curve') {
+      ctx.strokeStyle = 'rgba(47,95,208,0.85)';
+      ctx.beginPath();
+      r.geom.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+      if (r.closed) ctx.closePath();
+      ctx.stroke();
+      ctx.fillStyle = '#2f5fd0';
+      for (const p of r.geom) { ctx.beginPath(); ctx.arc(p.x, p.y, pr * 0.7, 0, 7); ctx.fill(); }
+    } else if (r.kind === 'angle') {
+      ctx.strokeStyle = 'rgba(208,80,47,0.9)';
+      ctx.beginPath();
+      ctx.moveTo(r.geom[0].x, r.geom[0].y); ctx.lineTo(r.geom[1].x, r.geom[1].y); ctx.lineTo(r.geom[2].x, r.geom[2].y);
+      ctx.stroke();
+      ctx.fillStyle = '#d0502f';
+      for (const p of r.geom) { ctx.beginPath(); ctx.arc(p.x, p.y, pr * 0.7, 0, 7); ctx.fill(); }
+    } else if (r.kind === 'circle') {
+      ctx.strokeStyle = 'rgba(30,150,90,0.9)';
+      ctx.beginPath(); ctx.arc(r.center.x, r.center.y, r.r, 0, 7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(r.center.x, r.center.y, pr * 0.7, 0, 7); ctx.fillStyle = '#1e9660'; ctx.fill();
+    }
+  }
+  // 作業中
+  if (work.length) {
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = mode === 'scale' ? '#c09000' : (mode === 'angle' ? '#d0502f' : '#2f5fd0');
+    ctx.beginPath();
+    work.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    ctx.stroke();
+    ctx.fillStyle = '#ff5722';
+    for (const p of work) { ctx.beginPath(); ctx.arc(p.x, p.y, pr, 0, 7); ctx.fill(); }
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+function updateLive() {
+  if (mode === 'curve' && work.length >= 2) {
+    let L = 0;
+    for (let i = 1; i < work.length; i++) L += dist(work[i - 1], work[i]);
+    let turn = 0;
+    for (let i = 1; i + 1 < work.length; i++) turn += dirChange(work[i - 1], work[i], work[i + 1]);
+    liveEl.textContent = '曲線（作業中）：点 ' + work.length + ' 個／長さ ' + lenStr(L) + '／曲がり角度の合計 ' + fmt(Math.abs(turn)) + '°';
+  } else if (mode === 'scale') {
+    liveEl.textContent = work.length === 1 ? '縮尺：2点目をクリックしてください。' : '縮尺：スケールバーの1点目をクリックしてください。';
+  } else if (mode === 'angle') {
+    liveEl.textContent = '角度：' + ['端の点', '頂点', 'もう一方の端'][Math.min(work.length, 2)] + 'をクリック（' + work.length + '/3）';
+  } else if (mode === 'circle') {
+    liveEl.textContent = '円：円周上の点をクリック（' + work.length + '/3）';
+  } else {
+    liveEl.textContent = '作業中の計測はここに出ます。';
+  }
+}
+
+function addResult(r) {
+  results.push(r);
+  const tr = document.createElement('tr');
+  const tdN = document.createElement('td'); tdN.textContent = r.name;
+  const tdV = document.createElement('td'); tdV.className = 'num'; tdV.innerHTML = r.text;
+  const tdD = document.createElement('td');
+  const btn = document.createElement('button'); btn.className = 'del'; btn.textContent = '消す';
+  btn.onclick = () => { results = results.filter(x => x !== r); tr.remove(); draw(); };
+  tdD.appendChild(btn);
+  tr.appendChild(tdN); tr.appendChild(tdV); tr.appendChild(tdD);
+  resultBody.appendChild(tr);
+  draw();
+}
+
+function finishCurve(closed) {
+  if (work.length < 2) { setStatus('点が足りません。カーブに沿って2点以上打ってください。'); return; }
+  let L = 0;
+  for (let i = 1; i < work.length; i++) L += dist(work[i - 1], work[i]);
+  if (closed) L += dist(work[work.length - 1], work[0]);
+  let turn = 0;
+  const n = work.length;
+  const upto = closed ? n : n - 1;
+  for (let i = 1; i < upto; i++) {
+    const p0 = work[(i - 1 + n) % n], p1 = work[i], p2 = work[(i + 1) % n];
+    if (!closed && i + 1 >= n) break;
+    turn += dirChange(p0, p1, p2);
+  }
+  counters.curve++;
+  const name = '曲線' + counters.curve + (closed ? '（閉）' : '');
+  const text = (closed ? '円周（周の長さ）：' : '長さ：') + lenStr(L) + '<br>曲がり角度の合計：' + fmt(Math.abs(turn)) + '°';
+  addResult({ kind: 'curve', name, text, geom: work.slice(), closed });
+  work = [];
+  updateLive();
+  setStatus(name + ' を確定しました。');
+}
+
+cv.addEventListener('click', e => {
+  if (!img || drag) return;
+  const rect = cv.getBoundingClientRect();
+  const p = toImg(e.clientX - rect.left, e.clientY - rect.top);
+  if (mode === 'pan') return;
+  work.push(p);
+  if (mode === 'scale' && work.length === 2) {
+    const dpx = dist(work[0], work[1]);
+    const input = prompt('2点間の実寸を mm で入力してください（例：10cm なら 100）', '100');
+    const mm = parseFloat(input);
+    if (mm > 0) {
+      pxPerMm = dpx / mm;
+      setStatus('縮尺を設定しました：1mm = ' + fmt(pxPerMm, 2) + ' px。これで mm で測れます。');
+    } else {
+      setStatus('縮尺は設定されませんでした（px表示のまま）。');
+    }
+    work = [];
+  } else if (mode === 'angle' && work.length === 3) {
+    counters.angle++;
+    const deg = angleDeg(work[0], work[1], work[2]);
+    addResult({ kind: 'angle', name: '角度' + counters.angle, text: fmt(deg) + '°', geom: work.slice() });
+    work = [];
+    setStatus('角度' + counters.angle + '：' + fmt(deg) + '°');
+  } else if (mode === 'circle' && work.length === 3) {
+    const cf = circleFrom3(work[0], work[1], work[2]);
+    if (!cf) { setStatus('3点が一直線に近いため円が作れません。点を打ち直してください。'); work = []; }
+    else {
+      counters.circle++;
+      const arc = angleDeg(work[0], cf.c, work[2]);
+      const circ = 2 * Math.PI * cf.r;
+      const text = '半径：' + lenStr(cf.r) + '<br>直径：' + lenStr(cf.r * 2) + '<br>円周：' + lenStr(circ) + '<br>弧の角度（1点目→3点目）：' + fmt(arc) + '°';
+      addResult({ kind: 'circle', name: '円' + counters.circle, text, geom: work.slice(), center: cf.c, r: cf.r });
+      work = [];
+      setStatus('円' + counters.circle + ' を確定しました。');
+    }
+  }
+  updateLive();
+  draw();
+});
+
+cv.addEventListener('wheel', e => {
+  if (!img) return;
+  e.preventDefault();
+  const rect = cv.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const f = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  view.ox = mx - (mx - view.ox) * f;
+  view.oy = my - (my - view.oy) * f;
+  view.s *= f;
+  draw();
+}, { passive: false });
+
+cv.addEventListener('mousedown', e => {
+  if (!img) return;
+  if (mode === 'pan' || spaceDown) {
+    drag = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy, moved: false };
+  }
+});
+window.addEventListener('mousemove', e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+  view.ox = drag.ox + dx; view.oy = drag.oy + dy;
+  draw();
+});
+window.addEventListener('mouseup', () => { setTimeout(() => { drag = null; }, 0); });
+window.addEventListener('keydown', e => { if (e.code === 'Space') { spaceDown = true; e.preventDefault(); } });
+window.addEventListener('keyup', e => { if (e.code === 'Space') spaceDown = false; });
+
+document.querySelectorAll('[data-mode]').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('[data-mode]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    mode = b.dataset.mode;
+    work = [];
+    updateLive(); draw();
+    setStatus({ scale: '縮尺モード：スケールバーの両端をクリック。', curve: '曲線モード：カーブに沿ってクリックで点を打ちます。', angle: '角度モード：端→頂点→端の順に3点。', circle: '円モード：円周上の3点。', pan: '移動モード：ドラッグで画面を動かします。' }[mode]);
+  });
+});
+document.getElementById('btnUndo').onclick = () => { work.pop(); updateLive(); draw(); };
+document.getElementById('btnClear').onclick = () => { work = []; updateLive(); draw(); };
+document.getElementById('btnFinish').onclick = () => finishCurve(false);
+document.getElementById('btnFinishClosed').onclick = () => finishCurve(true);
+document.getElementById('btnAllDel').onclick = () => { results = []; resultBody.innerHTML = ''; draw(); };
+
+document.getElementById('btnCsv').onclick = () => {
+  const rows = [['名前', '種類', '結果']];
+  for (const r of results) rows.push([r.name, r.kind, r.text.replace(/<br>/g, ' / ').replace(/<[^>]+>/g, '')]);
+  const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv' }));
+  a.download = 'curvedot_results.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+const fileInput = document.getElementById('fileInput');
+document.getElementById('btnOpen').onclick = () => fileInput.click();
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadFile(fileInput.files[0]); });
+box.addEventListener('dragover', e => e.preventDefault());
+box.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
+
+function loadFile(f) {
+  const url = URL.createObjectURL(f);
+  const im = new Image();
+  im.onload = () => {
+    img = im;
+    const s = Math.min(cv.width / img.width, cv.height / img.height);
+    view = { s, ox: (cv.width - img.width * s) / 2, oy: (cv.height - img.height * s) / 2 };
+    work = [];
+    setStatus('画像を読み込みました。まず「縮尺」でスケールバーを2点クリックすると mm で測れます。');
+    updateLive(); draw();
+  };
+  im.src = url;
+}
+
+resize();
+updateLive();
+</script>
+</body>
+</html>
